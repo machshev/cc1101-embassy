@@ -1,0 +1,3 @@
+[workspace]
+members = ["cc1101", "examples/rp2040"]
+resolver = "2"

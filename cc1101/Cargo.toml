@@ -1,0 +1,22 @@
+[package]
+name = "cc1101-embassy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+authors = []
+description = "Async Embassy driver for the CC1101 sub-1GHz RF transceiver"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/machshev/cc1101-embassy"
+documentation = "https://docs.rs/cc1101-embassy"
+keywords = ["cc1101", "radio", "embedded-hal", "embassy", "no-std"]
+categories = ["embedded", "no-std", "hardware-support"]
+
+[dependencies]
+embedded-hal     = "1.0"
+embedded-hal-async = "1.0"
+
+defmt = { version = "0.3", optional = true }
+
+[features]
+default = []
+defmt = ["dep:defmt"]
