@@ -7,6 +7,14 @@ edition = "2021"
 name = "rssi_scan"
 path = "src/bin/rssi_scan.rs"
 
+[[bin]]
+name = "tx"
+path = "src/bin/tx.rs"
+
+[[bin]]
+name = "rx"
+path = "src/bin/rx.rs"
+
 [dependencies]
 cc1101-embassy = { path = "../../cc1101", features = ["defmt"] }
 
