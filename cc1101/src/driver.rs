@@ -35,19 +35,19 @@ pub struct ReceivedPacket {
 ///
 /// Construct with [`Cc1101::new`], then call [`Cc1101::configure`] before use.
 pub struct Cc1101<SPI, GDO0, GDO2> {
-    spi:    SPI,
-    gdo0:   GDO0,
+    spi: SPI,
+    gdo0: GDO0,
     /// Reserved for future use: RX FIFO threshold interrupt and sync-word detection.
     /// GDO2 is configured as RX FIFO threshold in [`Cc1101::configure`] but is not
     /// yet awaited directly — polling RXBYTES is used instead for simplicity.
     #[allow(dead_code)]
-    gdo2:   GDO2,
+    gdo2: GDO2,
     config: Option<RadioConfig>,
 }
 
 impl<SPI, GDO0, GDO2> Cc1101<SPI, GDO0, GDO2>
 where
-    SPI:  SpiDevice,
+    SPI: SpiDevice,
     GDO0: Wait,
     GDO2: Wait,
 {
@@ -58,17 +58,18 @@ where
     /// # Errors
     /// Returns [`Error::InvalidChip`] if the part number or version register
     /// doesn't match a CC1101, indicating a wiring problem.
-    pub async fn new(
-        spi:  SPI,
-        gdo0: GDO0,
-        gdo2: GDO2,
-    ) -> Result<Self, Error<SPI::Error>> {
-        let mut dev = Self { spi, gdo0, gdo2, config: None };
+    pub async fn new(spi: SPI, gdo0: GDO0, gdo2: GDO2) -> Result<Self, Error<SPI::Error>> {
+        let mut dev = Self {
+            spi,
+            gdo0,
+            gdo2,
+            config: None,
+        };
 
         dev.reset().await?;
 
         // Verify chip identity
-        let part    = dev.read_status(regs::STATUS_PARTNUM).await?;
+        let part = dev.read_status(regs::STATUS_PARTNUM).await?;
         let version = dev.read_status(regs::STATUS_VERSION).await?;
 
         // CC1101 always returns 0x00 for PARTNUM; VERSION is typically 0x04 or 0x14
@@ -103,11 +104,14 @@ where
         self.write_reg(regs::MDMCFG2, config.mdmcfg2()).await?;
 
         // Sync word
-        self.write_reg(regs::SYNC1, (config.sync_word >> 8) as u8).await?;
-        self.write_reg(regs::SYNC0, (config.sync_word & 0xFF) as u8).await?;
+        self.write_reg(regs::SYNC1, (config.sync_word >> 8) as u8)
+            .await?;
+        self.write_reg(regs::SYNC0, (config.sync_word & 0xFF) as u8)
+            .await?;
 
         // Deviation (FSK/GFSK only — OOK ignores this)
-        self.write_reg(regs::DEVIATN, config.deviation_register()).await?;
+        self.write_reg(regs::DEVIATN, config.deviation_register())
+            .await?;
 
         // Packet format
         let (pktlen, pktctrl0) = Self::packet_registers(config);
@@ -130,18 +134,19 @@ where
         self.write_reg(regs::IOCFG0, regs::GDO_SYNC_WORD).await?;
 
         // GDO2: assert when RX FIFO at or above threshold
-        self.write_reg(regs::IOCFG2, regs::GDO_RX_FIFO_THRESHOLD).await?;
+        self.write_reg(regs::IOCFG2, regs::GDO_RX_FIFO_THRESHOLD)
+            .await?;
 
         // Recommended register values from datasheet (Table 41)
         // These improve sensitivity and should always be applied.
         self.write_reg(regs::AGCCTRL2, 0x43).await?;
-        self.write_reg(regs::TEST2,    0x81).await?;
-        self.write_reg(regs::TEST1,    0x35).await?;
-        self.write_reg(regs::TEST0,    0x09).await?;
-        self.write_reg(regs::FSCAL3,   0xE9).await?;
-        self.write_reg(regs::FSCAL2,   0x2A).await?;
-        self.write_reg(regs::FSCAL1,   0x00).await?;
-        self.write_reg(regs::FSCAL0,   0x1F).await?;
+        self.write_reg(regs::TEST2, 0x81).await?;
+        self.write_reg(regs::TEST1, 0x35).await?;
+        self.write_reg(regs::TEST0, 0x09).await?;
+        self.write_reg(regs::FSCAL3, 0xE9).await?;
+        self.write_reg(regs::FSCAL2, 0x2A).await?;
+        self.write_reg(regs::FSCAL1, 0x00).await?;
+        self.write_reg(regs::FSCAL0, 0x1F).await?;
 
         // Auto-calibrate when going from IDLE to RX/TX
         self.write_reg(regs::MCSM0, 0x18).await?;
@@ -190,7 +195,7 @@ where
     pub async fn transmit(&mut self, data: &[u8]) -> Result<(), Error<SPI::Error>> {
         let max_len = match self.config.as_ref().map(|c| c.packet_length) {
             Some(PacketLength::Variable(n)) => n as usize,
-            Some(PacketLength::Fixed(n))    => n as usize,
+            Some(PacketLength::Fixed(n)) => n as usize,
             None => PacketLength::MAX_VARIABLE as usize,
         };
 
@@ -216,8 +221,14 @@ where
 
         // GDO0 is configured as SYNC_WORD: goes high when sync sent,
         // goes low when packet complete. Wait for the falling edge.
-        self.gdo0.wait_for_high().await.map_err(|_| Error::UnexpectedState { state: 0 })?;
-        self.gdo0.wait_for_low().await.map_err(|_| Error::UnexpectedState { state: 0 })?;
+        self.gdo0
+            .wait_for_rising_edge()
+            .await
+            .map_err(|_| Error::UnexpectedState { state: 0 })?;
+        self.gdo0
+            .wait_for_falling_edge()
+            .await
+            .map_err(|_| Error::UnexpectedState { state: 0 })?;
 
         Ok(())
     }
@@ -236,8 +247,14 @@ where
         self.strobe(regs::SRX).await?;
 
         // Wait for a complete packet: GDO0 high (sync received), then low (end of packet)
-        self.gdo0.wait_for_high().await.map_err(|_| Error::UnexpectedState { state: 0 })?;
-        self.gdo0.wait_for_low().await.map_err(|_| Error::UnexpectedState { state: 0 })?;
+        self.gdo0
+            .wait_for_rising_edge()
+            .await
+            .map_err(|_| Error::UnexpectedState { state: 0 })?;
+        self.gdo0
+            .wait_for_falling_edge()
+            .await
+            .map_err(|_| Error::UnexpectedState { state: 0 })?;
 
         // Check for FIFO overflow
         let rxbytes = self.read_status(regs::STATUS_RXBYTES).await?;
@@ -273,14 +290,18 @@ where
         self.read_burst(regs::RXFIFO, &mut buf[..read_len]).await?;
 
         // Read appended status bytes if configured (RSSI + LQI/CRC)
-        let append_status = self.config.as_ref().map(|c| c.append_status).unwrap_or(true);
-        let crc_enable    = self.config.as_ref().map(|c| c.crc_enable).unwrap_or(true);
+        let append_status = self
+            .config
+            .as_ref()
+            .map(|c| c.append_status)
+            .unwrap_or(true);
+        let crc_enable = self.config.as_ref().map(|c| c.crc_enable).unwrap_or(true);
 
         let (rssi_dbm, lqi, crc_ok) = if append_status {
             let rssi_raw = self.read_reg(regs::RXFIFO).await?;
-            let status   = self.read_reg(regs::RXFIFO).await?;
-            let crc_ok   = (status & 0x80) != 0;
-            let lqi      = status & 0x7F;
+            let status = self.read_reg(regs::RXFIFO).await?;
+            let crc_ok = (status & 0x80) != 0;
+            let lqi = status & 0x7F;
             (Self::rssi_dbm(rssi_raw), lqi, crc_ok)
         } else {
             (0i16, 0u8, true)
@@ -290,7 +311,12 @@ where
             return Err(Error::CrcError);
         }
 
-        Ok(ReceivedPacket { len: read_len, rssi_dbm, lqi, crc_ok })
+        Ok(ReceivedPacket {
+            len: read_len,
+            rssi_dbm,
+            lqi,
+            crc_ok,
+        })
     }
 
     // ---- SPI primitives (private) -------------------------------------------
@@ -306,9 +332,7 @@ where
     pub(crate) async fn write_reg(&mut self, addr: u8, value: u8) -> Result<(), Error<SPI::Error>> {
         // Header byte: write (bit 7 = 0), single (bit 6 = 0), address [5:0]
         self.spi
-            .transaction(&mut [
-                Operation::Write(&[addr & 0x3F, value]),
-            ])
+            .transaction(&mut [Operation::Write(&[addr & 0x3F, value])])
             .await
             .map_err(Error::Spi)
     }
@@ -342,9 +366,7 @@ where
     /// Issue a strobe command (single-byte write, no data).
     async fn strobe(&mut self, cmd: u8) -> Result<(), Error<SPI::Error>> {
         self.spi
-            .transaction(&mut [
-                Operation::Write(&[cmd]),
-            ])
+            .transaction(&mut [Operation::Write(&[cmd])])
             .await
             .map_err(Error::Spi)
     }
@@ -354,10 +376,7 @@ where
         // Header: write, burst, address
         let header = [addr | regs::BURST];
         self.spi
-            .transaction(&mut [
-                Operation::Write(&header),
-                Operation::Write(data),
-            ])
+            .transaction(&mut [Operation::Write(&header), Operation::Write(data)])
             .await
             .map_err(Error::Spi)
     }
@@ -366,10 +385,7 @@ where
     async fn read_burst(&mut self, addr: u8, buf: &mut [u8]) -> Result<(), Error<SPI::Error>> {
         let header = [addr | regs::READ | regs::BURST];
         self.spi
-            .transaction(&mut [
-                Operation::Write(&header),
-                Operation::Read(buf),
-            ])
+            .transaction(&mut [Operation::Write(&header), Operation::Read(buf)])
             .await
             .map_err(Error::Spi)
     }
@@ -377,9 +393,7 @@ where
     /// Write the PA table (single entry — index 0 only for non-ASK use).
     async fn write_patable(&mut self, value: u8) -> Result<(), Error<SPI::Error>> {
         self.spi
-            .transaction(&mut [
-                Operation::Write(&[regs::PATABLE | regs::BURST, value]),
-            ])
+            .transaction(&mut [Operation::Write(&[regs::PATABLE | regs::BURST, value])])
             .await
             .map_err(Error::Spi)
     }
@@ -397,7 +411,7 @@ where
         // PKTLEN: the length byte
         // PKTCTRL0 bits: [6:5] = packet format, [2] = CRC enable, [1:0] = length config
         let (pktlen, len_config) = match config.packet_length {
-            PacketLength::Fixed(n)    => (n, 0b00u8), // fixed length
+            PacketLength::Fixed(n) => (n, 0b00u8),    // fixed length
             PacketLength::Variable(n) => (n, 0b01u8), // variable length
         };
 
